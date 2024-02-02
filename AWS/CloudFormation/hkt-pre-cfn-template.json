@@ -1,0 +1,245 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Resources": {
+        "LambdaInvalidateCloudFormation": {
+            "Type": "AWS::Lambda::Function",
+            "Properties": {
+                "Handler": "hkt_cacheInvalidation.handler",
+                "FunctionName": "hkt-pre-invalidation-lambda",
+                "Role": "arn:aws:iam::544704954997:role/LabRole",
+                "Runtime": "nodejs18.x",
+                "Code": {
+                    "S3Bucket": "hkt-cloudformation-template-bucket",
+                    "S3Key": "lambdas/hkt_cacheInvalidationv2.zip"
+                },
+                "Timeout": 900
+            }
+        },
+        "LambdaInvCFInvokePermission": {
+            "Type": "AWS::Lambda::Permission",
+            "Properties": {
+                "Action": "lambda:InvokeFunction",
+                "FunctionName": {
+                    "Fn::GetAtt": [
+                        "LambdaInvalidateCloudFormation",
+                        "Arn"
+                    ]
+                },
+                "Principal": "s3.amazonaws.com",
+                "SourceAccount": {
+                    "Ref": "AWS::AccountId"
+                },
+                "SourceArn": {
+                    "Fn::GetAtt": [
+                        "HktMergepathWebappBucket",
+                        "Arn"
+                    ]
+                }
+            }
+        },
+        "HktMergepathWebappBucket": {
+            "Type": "AWS::S3::Bucket",
+            "DependsOn": "LambdaInvalidateCloudFormation",
+            "Properties": {
+                "BucketName": "hkt-pre-mergepath-webapp",
+                "AccessControl": "Private",
+                "VersioningConfiguration": {
+                    "Status": "Enabled"
+                }
+            }
+        },
+        "S3MergepathBucketPolicy": {
+            "Type": "AWS::S3::BucketPolicy",
+            "Properties": {
+                "Bucket": {
+                    "Ref": "HktMergepathWebappBucket"
+                },
+                "PolicyDocument": {
+                    "Id": "S3MergepathBucketPolicy",
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Sid": "GrantOAIToCloudFront",
+                            "Effect": "Allow",
+                            "Principal": {
+                                "CanonicalUser": {
+                                    "Fn::GetAtt": [
+                                        "CloudFrontOriginAccessIdentity",
+                                        "S3CanonicalUserId"
+                                    ]
+                                }
+                            },
+                            "Action": "s3:GetObject",
+                            "Resource": {
+                                "Fn::Join": [
+                                    "",
+                                    [
+                                        "arn:aws:s3:::",
+                                        {
+                                            "Ref": "HktMergepathWebappBucket"
+                                        },
+                                        "/*"
+                                    ]
+                                ]
+                            }
+                        },
+                        {
+                            "Sid": "LambdaS3Invoke",
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": "lambda.amazonaws.com"
+                            },
+                            "Action": [
+                                "s3:GetObject",
+                                "s3:PutObject"
+                            ],
+                            "Resource": [
+                                "arn:aws:s3:::hkt-pre-mergepath-webapp/*"
+                            ]
+                        }
+                    ]
+                }
+            }
+        },
+        "MergePathCloudFrontDistribution": {
+            "Type": "AWS::CloudFront::Distribution",
+            "Properties": {
+                "DistributionConfig": {
+                    "Origins": [
+                        {
+                            "DomainName": {
+                                "Fn::GetAtt": [
+                                    "HktMergepathWebappBucket",
+                                    "DomainName"
+                                ]
+                            },
+                            "Id": "S3Origin",
+                            "S3OriginConfig": {
+                                "OriginAccessIdentity": {
+                                    "Fn::Join": [
+                                        "",
+                                        [
+                                            "origin-access-identity/cloudfront/",
+                                            {
+                                                "Ref": "CloudFrontOriginAccessIdentity"
+                                            }
+                                        ]
+                                    ]
+                                }
+                            }
+                        }
+                    ],
+                    "Enabled": true,
+                    "DefaultRootObject": "index.html",
+                    "DefaultCacheBehavior": {
+                        "TargetOriginId": "S3Origin",
+                        "ViewerProtocolPolicy": "redirect-to-https",
+                        "ForwardedValues": {
+                            "QueryString": false,
+                            "Cookies": {
+                                "Forward": "none"
+                            }
+                        }
+                    },
+                    "ViewerCertificate": {
+                        "CloudFrontDefaultCertificate": true
+                    }
+                }
+            }
+        },
+        "CloudFrontOriginAccessIdentity": {
+            "Type": "AWS::CloudFront::CloudFrontOriginAccessIdentity",
+            "Properties": {
+                "CloudFrontOriginAccessIdentityConfig": {
+                    "Comment": "OAI for CloudFront to access S3 bucket"
+                }
+            }
+        },
+        "LambdaGit": {
+            "Type": "AWS::Lambda::Function",
+            "Properties": {
+                "Handler": "hkt_gitDownload.handler",
+                "FunctionName": "hkt-pre-gitDownload-lambda",
+                "Role": "arn:aws:iam::544704954997:role/LabRole",
+                "Runtime": "nodejs18.x",
+                "Code": {
+                    "S3Bucket": "hkt-cloudformation-template-bucket",
+                    "S3Key": "lambdas/hkt_gitDownloadv1.zip"
+                },
+                "Timeout": 900
+            }
+        },
+        "LambdaGitInvokePermission": {
+            "Type": "AWS::Lambda::Permission",
+            "Properties": {
+                "Action": "lambda:InvokeFunction",
+                "FunctionName": {
+                    "Fn::GetAtt": [
+                        "LambdaGit",
+                        "Arn"
+                    ]
+                },
+                "Principal": "s3.amazonaws.com",
+                "SourceAccount": {
+                    "Ref": "AWS::AccountId"
+                },
+                "SourceArn": {
+                    "Fn::GetAtt": [
+                        "HktReleaseRegistryBucket",
+                        "Arn"
+                    ]
+                }
+            }
+        },
+        "HktReleaseRegistryBucket": {
+            "Type": "AWS::S3::Bucket",
+            "DependsOn": "LambdaGit",
+            "Properties": {
+                "BucketName": "hkt-pre-release-registry-webapp",
+                "AccessControl": "Private",
+                "VersioningConfiguration": {
+                    "Status": "Enabled"
+                }
+            }
+        },
+        "S3ReleaseRegistryBucketPolicy": {
+            "Type": "AWS::S3::BucketPolicy",
+            "Properties": {
+                "Bucket": {
+                    "Ref": "HktReleaseRegistryBucket"
+                },
+                "PolicyDocument": {
+                    "Id": "S3ReleaseRegistryBucketPolicy",
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Sid": "LambdaS3Invoke",
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": "lambda.amazonaws.com"
+                            },
+                            "Action": [
+                                "s3:GetObject",
+                                "s3:PutObject"
+                            ],
+                            "Resource": [
+                                "arn:aws:s3:::hkt-pre-release-registry-webapp/*"
+                            ]
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    "Outputs": {
+        "CloudFrontDistributionIdOutput": {
+            "Description": "The ID of the CloudFront Distribution",
+            "Value": {
+                "Ref": "MergePathCloudFrontDistribution"
+            },
+            "Export": {
+                "Name": "CloudFrontDistributionId"
+            }
+        }
+    }
+}
